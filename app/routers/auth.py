@@ -1,13 +1,14 @@
 from fastapi import APIRouter, HTTPException, status
 from tortoise.exceptions import IntegrityError
 from app.db.models import User
-from app.schemas.schemas import User_Pydantic, UserIn_Pydantic
+from app.schemas.schemas import User_Pydantic
+from app.schemas.user import UserCreate
 from app.auth import verify_password, get_password_hash
 
 router = APIRouter()
 
 @router.post("/register/", response_model=User_Pydantic, status_code=status.HTTP_201_CREATED)
-async def register(user: UserIn_Pydantic):
+async def register(user: UserCreate):
     """
     Crée un nouvel utilisateur s'il n'existe pas déjà dans la base de données.
     - Vérifie si l'email est déjà enregistré.
