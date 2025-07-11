@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Lecteur de Podcast</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 2rem; background: #f9f9f9; }
+    .player { max-width: 600px; margin: auto; padding: 2rem; background: #fff; border-radius: 10px; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
+    audio { width: 100%; margin-top: 1rem; }
+    .info { margin-top: 1rem; color: #666; font-size: 14px; }
+  </style>
+</head>
+<body>
+  <div class="player">
+    <h2>🎧 Podcast #1</h2>
+    <audio controls preload="none" id="audioPlayer">
+      Votre navigateur ne supporte pas l'audio HTML5.
+    </audio>
+    <div class="info" id="infoBox">Chargement des infos...</div>
+  </div>
+
+  <script>
+    const podcastId = 15;  // Remplace par l'ID réel
+    const audio = document.getElementById("audioPlayer");
+    const infoBox = document.getElementById("infoBox");
+
+    fetch('http://localhost:8000/podcasts/stream/15?info=true')
+      .then(res => res.json())
+      .then(data => {
+        console.log(data);
+
+        audio.src = data.stream_url;
+        infoBox.innerText = `Nom: ${data.file_name} • Type: ${data.mime_type} • Taille: ${Math.round(data.file_size / 1024)} KB`;
+      })
+      .catch(err => {
+        infoBox.innerText = "Erreur de chargement du podcast.";
+        console.error(err);
+      });
+  </script>
+</body>
+</html>
