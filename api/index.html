@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Lecteur de Podcast</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            primary: '#8b5cf6',
+            secondary: '#a78bfa',
+            dark: '#1e293b',
+            light: '#f1f5f9'
+          },
+          fontFamily: {
+            sans: ['Poppins', 'sans-serif']
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    .audio-player {
+      -webkit-appearance: none;
+      height: 6px;
+      border-radius: 10px;
+      background: #e2e8f0;
+      outline: none;
+    }
+    
+    .audio-player::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: #8b5cf6;
+      cursor: pointer;
+      transition: all 0.2s;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+    }
+    
+    .audio-player::-webkit-slider-thumb:hover {
+      transform: scale(1.2);
+      background: #7c3aed;
+    }
+    
+    .progress-container {
+      position: relative;
+      cursor: pointer;
+    }
+    
+    .progress-bar {
+      height: 6px;
+      border-radius: 10px;
+      background: #ddd;
+      position: relative;
+    }
+    
+    .progress-filled {
+      position: absolute;
+      top: 0;
+      left: 0;
+      height: 100%;
+      width: 0;
+      background: linear-gradient(to right, #8b5cf6, #a78bfa);
+      border-radius: 10px;
+      transition: width 0.1s linear;
+    }
+    
+    .play-btn {
+      transition: all 0.3s ease;
+      box-shadow: 0 4px 8px rgba(139, 92, 246, 0.3);
+    }
+    
+    .play-btn:hover {
+      transform: scale(1.05);
+      box-shadow: 0 6px 12px rgba(139, 92, 246, 0.4);
+    }
+    
+    .control-btn {
+      transition: all 0.2s;
+    }
+    
+    .control-btn:hover {
+      transform: scale(1.1);
+      color: #8b5cf6;
+    }
+    
+    .podcast-card {
+      transition: transform 0.3s ease, box-shadow 0.3s ease;
+    }
+    
+    .podcast-card:hover {
+      transform: translateY(-5px);
+      box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1), 0 10px 10px -5px rgba(0,0,0,0.04);
+    }
+    
+    .loading-spinner {
+      animation: spin 1s linear infinite;
+    }
+    
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+    
+    .fade-in {
+      animation: fadeIn 0.5s ease-in;
+    }
+    
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+  </style>
+</head>
+
+<body class="bg-gradient-to-br from-indigo-50 to-purple-100 min-h-screen flex items-center justify-center px-4 font-sans">
+  <div class="podcast-card w-full max-w-md bg-white shadow-xl rounded-2xl overflow-hidden transition-all">
+    <div class="bg-gradient-to-r from-primary to-secondary p-6 text-white">
+      <div class="flex items-center justify-between">
+        <div>
+          <h1 class="text-2xl font-bold flex items-center gap-2">
+            <i class="fas fa-podcast"></i>
+            <span id="podcastTitle">Épisode #1</span>
+          </h1>
+          <p id="infoBox" class="text-sm opacity-90 mt-1 flex items-center">
+            <span class="loading-spinner inline-block mr-2"><i class="fas fa-spinner"></i></span>
+            Chargement des infos...
+          </p>
+        </div>
+        <div class="bg-white/20 p-2 rounded-lg">
+          <i class="fas fa-headphones text-xl"></i>
+        </div>
+      </div>
+    </div>
+
+    <div class="p-6">
+      <div class="relative mb-6">
+        <div class="absolute inset-0 bg-gradient-to-t from-dark/80 to-transparent rounded-2xl z-10"></div>
+        <img src="https://images.unsplash.com/photo-1581276879432-15a33b307f73?fit=crop&w=600&q=80"
+             alt="Podcast cover"
+             class="w-full h-60 object-cover rounded-2xl shadow-md">
+        <div class="absolute bottom-4 left-4 z-20 text-white">
+          <h2 class="font-bold text-xl">Les Mystères du Code</h2>
+          <p class="text-sm opacity-80">Saison 2, Épisode 15</p>
+        </div>
+      </div>
+
+      <div class="mb-6">
+        <div class="flex items-center justify-center gap-4 mb-4">
+          <button class="control-btn text-gray-500 text-xl">
+            <i class="fas fa-step-backward"></i>
+          </button>
+          <button id="playButton" class="play-btn w-14 h-14 rounded-full bg-primary flex items-center justify-center text-white text-2xl">
+            <i class="fas fa-play"></i>
+          </button>
+          <button class="control-btn text-gray-500 text-xl">
+            <i class="fas fa-step-forward"></i>
+          </button>
+        </div>
+        
+        <div class="progress-container mb-1">
+          <div class="progress-bar">
+            <div class="progress-filled" id="progressBar"></div>
+          </div>
+        </div>
+        
+        <div class="flex justify-between items-center text-xs text-gray-500 mb-6">
+          <span id="currentTime">00:00</span>
+          <span id="duration">--:--</span>
+        </div>
+        
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <button class="control-btn text-gray-500">
+              <i class="fas fa-volume-up"></i>
+            </button>
+            <input type="range" min="0" max="100" value="80" class="audio-player w-24">
+          </div>
+          <div class="flex items-center gap-3">
+            <button class="control-btn text-gray-500">
+              <i class="fas fa-heart"></i>
+            </button>
+            <button class="control-btn text-gray-500">
+              <i class="fas fa-share-alt"></i>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div class="bg-gray-50 rounded-xl p-4 fade-in">
+        <h3 class="font-semibold text-gray-800 mb-2 flex items-center gap-2">
+          <i class="fas fa-info-circle text-primary"></i>
+          Informations sur l'épisode
+        </h3>
+        <div class="grid grid-cols-2 gap-3 text-sm">
+          <div class="flex items-center gap-2">
+            <span class="bg-gray-200 rounded-lg px-2 py-1 text-gray-600">
+              <i class="fas fa-file-audio"></i>
+            </span>
+            <span>Type: <span id="mimeType" class="font-medium">-</span></span>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="bg-gray-200 rounded-lg px-2 py-1 text-gray-600">
+              <i class="fas fa-weight-hanging"></i>
+            </span>
+            <span>Taille: <span id="fileSize" class="font-medium">-</span> KB</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="bg-gray-200 rounded-lg px-2 py-1 text-gray-600">
+              <i class="fas fa-calendar"></i>
+            </span>
+            <span>Date: <span class="font-medium">12/06/2023</span></span>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="bg-gray-200 rounded-lg px-2 py-1 text-gray-600">
+              <i class="fas fa-clock"></i>
+            </span>
+            <span>Durée: <span class="font-medium">24:18</span></span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const podcastId = 15;
+    const audio = new Audio();
+    const playButton = document.getElementById("playButton");
+    const infoBox = document.getElementById("infoBox");
+    const podcastTitle = document.getElementById("podcastTitle");
+    const mimeType = document.getElementById("mimeType");
+    const fileSize = document.getElementById("fileSize");
+    const durationDisplay = document.getElementById("duration");
+    const currentTimeDisplay = document.getElementById("currentTime");
+    const progressBar = document.getElementById("progressBar");
+    const progressContainer = document.querySelector('.progress-container');
+
+    // Simuler les données de podcast (en production, utiliser l'API réelle)
+    const podcastData = {
+      stream_url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3",
+      file_name: "Les mystères du code non documenté",
+      podcast_id: 15,
+      mime_type: "audio/mp3",
+      file_size: 5832
+    };
+
+    // Simuler le chargement des données
+    setTimeout(() => {
+      audio.src = podcastData.stream_url;
+      infoBox.innerHTML = `<i class="fas fa-microphone-alt mr-2"></i> ${podcastData.file_name}`;
+      podcastTitle.textContent = `Épisode #${podcastData.podcast_id}`;
+      mimeType.textContent = podcastData.mime_type;
+      fileSize.textContent = (podcastData.file_size / 1024).toFixed(1);
+      
+      // Simuler la durée après le chargement des métadonnées
+      setTimeout(() => {
+        durationDisplay.textContent = "24:18";
+      }, 500);
+      
+    }, 1500);
+
+    // Contrôle de lecture
+    let isPlaying = false;
+    playButton.addEventListener('click', () => {
+      if (isPlaying) {
+        audio.pause();
+        playButton.innerHTML = '<i class="fas fa-play"></i>';
+      } else {
+        audio.play();
+        playButton.innerHTML = '<i class="fas fa-pause"></i>';
+      }
+      isPlaying = !isPlaying;
+    });
+
+    // Mise à jour du temps et de la progression
+    audio.addEventListener('timeupdate', () => {
+      const currentTime = audio.currentTime;
+      const duration = audio.duration;
+      
+      currentTimeDisplay.textContent = formatTime(currentTime);
+      
+      if (duration) {
+        const progressPercent = (currentTime / duration) * 100;
+        progressBar.style.width = `${progressPercent}%`;
+      }
+    });
+
+    // Cliquer sur la barre de progression pour changer le temps
+    progressContainer.addEventListener('click', (e) => {
+      const width = progressContainer.clientWidth;
+      const clickX = e.offsetX;
+      const duration = audio.duration;
+      
+      audio.currentTime = (clickX / width) * duration;
+    });
+
+    // Formatage du temps
+    function formatTime(seconds) {
+      const mins = Math.floor(seconds / 60);
+      const secs = Math.floor(seconds % 60);
+      return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+    }
+
+    // Initialiser le lecteur
+    audio.addEventListener('loadedmetadata', () => {
+      durationDisplay.textContent = formatTime(audio.duration);
+    });
+  </script>
+</body>
+</html>
