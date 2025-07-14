@@ -1,6 +1,6 @@
 # app/controllers/podcast_controller.py
 
-import os, re, shutil, mimetypes
+import os, re, shutil, mimetypes, tempfile, logging
 import aiofiles
 from fastapi import UploadFile, HTTPException
 from app.db.models import Podcast
@@ -11,9 +11,10 @@ from fastapi.responses import StreamingResponse, JSONResponse
 
 from uuid import uuid4
 
+from mutagen import File
+
 MEDIA_DIR = "media"
 os.makedirs(MEDIA_DIR, exist_ok=True)
-
 
 async def create_podcast(
     title: str,
@@ -23,41 +24,83 @@ async def create_podcast(
     cover_image: UploadFile | None,
     author_id: int
 ) -> PodcastOut:
-    # ✅ Créer le dossier de stockage s'il n'existe pas
-    os.makedirs(MEDIA_DIR, exist_ok=True)
+    try:
+        # 1. Vérification préliminaire des fichiers
+        if not audio_file.filename:
+            raise HTTPException(status_code=400, detail="Nom de fichier audio manquant")
 
-    # ✅ Générer un nom unique pour le fichier audio pour éviter les conflits
-    audio_filename = f"{uuid4().hex}_{audio_file.filename}"
-    audio_path = os.path.join(MEDIA_DIR, audio_filename)
+        # 2. Création du répertoire média
+        os.makedirs(MEDIA_DIR, exist_ok=True)
 
-    # ✅ Sauvegarder physiquement le fichier audio sur le disque
-    with open(audio_path, "wb") as buffer:
-        shutil.copyfileobj(audio_file.file, buffer)
+        # 3. Traitement du fichier audio
+        audio_filename = f"{uuid4().hex}_{audio_file.filename}"
+        audio_path = os.path.join(MEDIA_DIR, audio_filename)
 
-    # ✅ Préparer la variable pour le chemin de l’image de couverture
-    cover_path = None
-    if cover_image:
-        # ✅ Générer un nom unique pour l’image de couverture
-        cover_filename = f"{uuid4().hex}_{cover_image.filename}"
-        cover_path = os.path.join(MEDIA_DIR, cover_filename)
+        # 3a. Sauvegarde temporaire pour analyse
+        temp_file_path = None
+        try:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(audio_file.filename)[1]) as temp_file:
+                content = await audio_file.read()
+                if len(content) == 0:
+                    raise HTTPException(status_code=400, detail="Le fichier audio est vide")
+                
+                temp_file.write(content)
+                temp_file_path = temp_file.name
+                
+                # Réinitialiser le pointeur pour la sauvegarde définitive
+                await audio_file.seek(0)
+        except Exception as e:
+            logging.error(f"Erreur de traitement temporaire: {str(e)}")
+            raise HTTPException(status_code=500, detail="Erreur de traitement audio")
 
-        # ✅ Sauvegarder physiquement l’image de couverture sur le disque
-        with open(cover_path, "wb") as buffer:
-            shutil.copyfileobj(cover_image.file, buffer)
+        # 3b. Analyse de la durée avec Mutagen
+        try:
+            audio = File(temp_file_path)
+            if audio is None:
+                raise HTTPException(status_code=400, detail="Format audio non supporté")
+            
+            audio_duration = int(audio.info.length) if audio.info else duration
+            if audio_duration <= 0:
+                raise HTTPException(status_code=400, detail="Durée audio non valide")
+        finally:
+            if temp_file_path and os.path.exists(temp_file_path):
+                os.unlink(temp_file_path)
 
-    # ✅ Créer un enregistrement du podcast dans la base de données
-    podcast = await Podcast.create(
-        title=title,
-        description=description,
-        audio_file=audio_path,   # chemin du fichier audio sur le disque
-        cover_image=cover_path,  # chemin de l'image si elle existe
-        duration=duration,
-        author_id=author_id
-    )
+        # 3c. Sauvegarde définitive du fichier audio
+        with open(audio_path, "wb") as buffer:
+            shutil.copyfileobj(audio_file.file, buffer)
 
-    # ✅ Retourner une version "schéma" du podcast, pour réponse client
-    return await PodcastOut.from_tortoise_orm(podcast)
+        # 4. Traitement de l'image de couverture
+        cover_path = None
+        if cover_image and cover_image.filename:
+            cover_filename = f"{uuid4().hex}_{cover_image.filename}"
+            cover_path = os.path.join(MEDIA_DIR, cover_filename)
 
+            with open(cover_path, "wb") as buffer:
+                shutil.copyfileobj(cover_image.file, buffer)
+
+        # 5. Création en base de données
+        podcast = await Podcast.create(
+            title=title,
+            description=description,
+            audio_file=audio_path,
+            cover_image=cover_path,
+            duration=audio_duration,
+            author_id=author_id
+        )
+
+        return await PodcastOut.from_tortoise_orm(podcast)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Erreur lors de la création du podcast: {str(e)}")
+        # Nettoyage en cas d'erreur
+        if 'audio_path' in locals() and os.path.exists(audio_path):
+            os.remove(audio_path)
+        if 'cover_path' in locals() and cover_path and os.path.exists(cover_path):
+            os.remove(cover_path)
+        raise HTTPException(status_code=500, detail="Erreur interne du serveur")
 # Taille des morceaux envoyés au client pendant le streaming (64 Ko)
 CHUNK_SIZE = 1024 * 64  # 64 Ko
 
@@ -66,7 +109,7 @@ async def get_podcast_stream(podcast_id: int) -> str:
     podcast = await Podcast.get_or_none(id=podcast_id)
     if not podcast or not podcast.audio_file:
         raise HTTPException(status_code=404, detail="Podcast not found")
-    return podcast.audio_file
+    return podcast
 
 
 # 🎧 Contrôleur principal pour le stream audio avec ou sans Range
@@ -84,7 +127,8 @@ async def stream_podcast_controller(podcast_id: int, request: Request, info: boo
     """
 
     # 🧭 1. Récupération du chemin du fichier selon l'ID
-    audio_path = await get_podcast_stream(podcast_id)
+    podcast = await get_podcast_stream(podcast_id)
+    audio_path = podcast.audio_file
 
     # 🛑 2. Vérification de l'existence physique du fichier
     if not os.path.exists(audio_path):
@@ -104,7 +148,8 @@ async def stream_podcast_controller(podcast_id: int, request: Request, info: boo
             "file_size": file_size,
             "mime_type": mime_type,
             "stream_url": stream_url,
-            "status": "ready"
+            "status": "ready",
+            "duration": podcast.duration,  # Placeholder, peut être remplacé par la durée réelle
         })
 
     # 🔍 5. Gestion du header "Range" (lecture partielle demandée par le client)
