@@ -1,3 +1,4 @@
+import logging
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from tortoise.exceptions import IntegrityError, DoesNotExist
@@ -99,8 +100,15 @@ async def get_current_user_info(token: str = Depends(oauth2_scheme)):
         "email": "john@example.com"
     }
     """
+    
+    # logging.info(f"Token received: {token}")  # <-- Add this
+    
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        
+        # # debug: print the payload for verification
+        # print(f"Decoded JWT payload: {payload}")
+        
         email = payload.get("sub")
         if email is None:
             raise HTTPException(

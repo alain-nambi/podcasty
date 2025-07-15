@@ -1,12 +1,14 @@
 # app/controllers/podcast_controller.py
 
 import os, re, shutil, mimetypes, tempfile, logging
+from typing import List, Dict, Any
 import aiofiles
 from fastapi import UploadFile, HTTPException
 from app.db.models import Podcast
 from app.schemas.podcast_schema import PodcastOut
 from fastapi import Request, HTTPException
 from fastapi.responses import StreamingResponse, JSONResponse
+from tortoise.exceptions import DoesNotExist
 
 
 from uuid import uuid4
@@ -15,6 +17,79 @@ from mutagen import File
 
 MEDIA_DIR = "media"
 os.makedirs(MEDIA_DIR, exist_ok=True)
+
+async def get_podcast_by_id(podcast_id: int):
+    """
+    Retrieve a single podcast by its ID, including author details.
+    """
+    try:
+        podcast = await Podcast.get_or_none(id=podcast_id).select_related("author")
+
+        if not podcast:
+            raise HTTPException(status_code=404, detail="Podcast not found")
+
+        logging.info(f"[get_podcast_by_id] Fetched podcast ID: {podcast.id} by {getattr(podcast.author, 'username', 'unknown')}")
+
+        return {
+            "id": podcast.id,
+            "title": podcast.title or "",
+            "description": podcast.description or "",
+            "audio_file": podcast.audio_file or "",
+            "cover_image": podcast.cover_image,
+            "duration": podcast.duration or 0,
+            "created_at": podcast.created_at.isoformat() if podcast.created_at else None,
+            # "updated_at": podcast.updated_at.isoformat() if podcast.updated_at else None,
+            "author": {
+                "id": getattr(podcast.author, "id", None),
+                "username": getattr(podcast.author, "username", ""),
+                "email": getattr(podcast.author, "email", "")
+            }
+        }
+
+    except HTTPException:
+        # Relever l’exception d'origine si elle est déjà lancée
+        raise
+    except Exception as e:
+        logging.error(f"[get_podcast_by_id] Unexpected error for podcast ID {podcast_id}: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+async def get_all_podcasts_by_user(user_id: int) -> List[Dict[str, Any]]:
+    try:
+        podcasts = await Podcast.filter(author_id=user_id).select_related("author")
+    except DoesNotExist:
+        logging.warning(f"No podcasts found for user {user_id}")
+        return []
+
+    results = []
+    for p in podcasts:
+        try:
+            author_info = {
+                "id": getattr(p.author, "id", None),
+                "username": getattr(p.author, "username", ""),
+                "email": getattr(p.author, "email", "")
+            }
+
+            podcast_data = {
+                "id": p.id,
+                "title": p.title or "",
+                "description": p.description or "",
+                "audio_file": p.audio_file or "",
+                "cover_image": p.cover_image,
+                "duration": p.duration or 0,
+                "created_at": p.created_at.isoformat() if p.created_at else None,
+                "updated_at": p.updated_at.isoformat() if p.updated_at else None,
+                "author": author_info
+            }
+
+            results.append(podcast_data)
+
+        except Exception as e:
+            logging.error(f"[Podcast ID {getattr(p, 'id', 'unknown')}] Error: {e}")
+            continue  # Skip faulty entries
+
+    return results
+
 
 async def create_podcast(
     title: str,
@@ -103,6 +178,7 @@ async def create_podcast(
         raise HTTPException(status_code=500, detail="Erreur interne du serveur")
 # Taille des morceaux envoyés au client pendant le streaming (64 Ko)
 CHUNK_SIZE = 1024 * 64  # 64 Ko
+
 
 # 🎯 Fonction utilitaire pour récupérer le chemin du fichier
 async def get_podcast_stream(podcast_id: int) -> str:

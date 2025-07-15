@@ -2,6 +2,12 @@ from fastapi import FastAPI
 from app.db.init import init_db
 from app.routers import auth_router, user_router, podcast_router
 from fastapi.middleware.cors import CORSMiddleware
+import logging 
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+)
 
 app = FastAPI(
     title="Postcast API",
