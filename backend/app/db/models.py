@@ -23,6 +23,24 @@ class Podcast(Model):
     duration = fields.IntField()
     created_at = fields.DatetimeField(auto_now_add=True)
     updated_at = fields.DatetimeField(auto_now=True)
+    categories = fields.ManyToManyField("models.Category", related_name="podcasts", through="podcast_category")
+    tags = fields.ManyToManyField("models.Tag", related_name="podcasts", through="podcast_tag")
     
     class Meta:
         table = "podcasts"
+        
+class Category(Model):
+    id = fields.IntField(pk=True)
+    name = fields.CharField(max_length=100, unique=True)
+    podcasts: fields.ManyToManyRelation["Podcast"]
+    
+    class Meta:
+        table = "categories"  # pluriel recommandé
+
+class Tag(Model):
+    id = fields.IntField(pk=True)
+    name = fields.CharField(max_length=100, unique=True)
+    podcasts: fields.ManyToManyRelation["Podcast"]
+    
+    class Meta:
+        table = "tags"  # pluriel recommandé

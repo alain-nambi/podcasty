@@ -4,7 +4,7 @@ import os, re, shutil, mimetypes, tempfile, logging
 from typing import List, Dict, Any
 import aiofiles
 from fastapi import UploadFile, HTTPException
-from app.db.models import Podcast
+from app.db.models import Category, Podcast, Tag
 from app.schemas.podcast_schema import PodcastOut
 from fastapi import Request, HTTPException
 from fastapi.responses import StreamingResponse, JSONResponse
@@ -97,72 +97,76 @@ async def create_podcast(
     duration: int,
     audio_file: UploadFile,
     cover_image: UploadFile | None,
-    author_id: int
+    author_id: int,
+    category_ids: list[int] | None = None,
+    tag_ids: list[int] | None = None
 ) -> PodcastOut:
+    audio_path = None
+    cover_path = None
+    temp_file_path = None
+
     try:
-        # 1. Vérification préliminaire des fichiers
         if not audio_file.filename:
             raise HTTPException(status_code=400, detail="Nom de fichier audio manquant")
 
-        # 2. Création du répertoire média
         os.makedirs(MEDIA_DIR, exist_ok=True)
 
-        # 3. Traitement du fichier audio
+        # Sauvegarde temporaire du fichier audio pour analyse
+        with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(audio_file.filename)[1]) as temp_file:
+            content = await audio_file.read()
+            if len(content) == 0:
+                raise HTTPException(status_code=400, detail="Le fichier audio est vide")
+            temp_file.write(content)
+            temp_file_path = temp_file.name
+
+        await audio_file.seek(0)
+
+        # Analyse de la durée avec Mutagen
+        audio = File(temp_file_path)
+        if audio is None or audio.info is None:
+            raise HTTPException(status_code=400, detail="Format audio non supporté")
+
+        audio_duration = int(audio.info.length)
+        if audio_duration <= 0:
+            raise HTTPException(status_code=400, detail="Durée audio non valide")
+
+        # Suppression du fichier temporaire
+        if temp_file_path and os.path.exists(temp_file_path):
+            os.unlink(temp_file_path)
+            temp_file_path = None
+
+        # Sauvegarde définitive du fichier audio
         audio_filename = f"{uuid4().hex}_{audio_file.filename}"
         audio_path = os.path.join(MEDIA_DIR, audio_filename)
-
-        # 3a. Sauvegarde temporaire pour analyse
-        temp_file_path = None
-        try:
-            with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(audio_file.filename)[1]) as temp_file:
-                content = await audio_file.read()
-                if len(content) == 0:
-                    raise HTTPException(status_code=400, detail="Le fichier audio est vide")
-                
-                temp_file.write(content)
-                temp_file_path = temp_file.name
-                
-                # Réinitialiser le pointeur pour la sauvegarde définitive
-                await audio_file.seek(0)
-        except Exception as e:
-            logging.error(f"Erreur de traitement temporaire: {str(e)}")
-            raise HTTPException(status_code=500, detail="Erreur de traitement audio")
-
-        # 3b. Analyse de la durée avec Mutagen
-        try:
-            audio = File(temp_file_path)
-            if audio is None:
-                raise HTTPException(status_code=400, detail="Format audio non supporté")
-            
-            audio_duration = int(audio.info.length) if audio.info else duration
-            if audio_duration <= 0:
-                raise HTTPException(status_code=400, detail="Durée audio non valide")
-        finally:
-            if temp_file_path and os.path.exists(temp_file_path):
-                os.unlink(temp_file_path)
-
-        # 3c. Sauvegarde définitive du fichier audio
         with open(audio_path, "wb") as buffer:
             shutil.copyfileobj(audio_file.file, buffer)
 
-        # 4. Traitement de l'image de couverture
-        cover_path = None
+        # Traitement de l'image de couverture
         if cover_image and cover_image.filename:
             cover_filename = f"{uuid4().hex}_{cover_image.filename}"
             cover_path = os.path.join(MEDIA_DIR, cover_filename)
-
             with open(cover_path, "wb") as buffer:
                 shutil.copyfileobj(cover_image.file, buffer)
 
-        # 5. Création en base de données
+        # Création du podcast en base
         podcast = await Podcast.create(
             title=title,
             description=description,
             audio_file=audio_path,
             cover_image=cover_path,
             duration=audio_duration,
-            author_id=author_id
+            author_id=author_id,
         )
+
+        # Ajout des catégories si fournies
+        if category_ids:
+            categories = await Category.filter(id__in=category_ids)
+            await podcast.categories.add(*categories)
+
+        # Ajout des tags si fournis
+        if tag_ids:
+            tags = await Tag.filter(id__in=tag_ids)
+            await podcast.tags.add(*tags)
 
         return await PodcastOut.from_tortoise_orm(podcast)
 
@@ -170,12 +174,16 @@ async def create_podcast(
         raise
     except Exception as e:
         logging.error(f"Erreur lors de la création du podcast: {str(e)}")
-        # Nettoyage en cas d'erreur
-        if 'audio_path' in locals() and os.path.exists(audio_path):
+        # Nettoyage fichiers en cas d'erreur
+        if audio_path and os.path.exists(audio_path):
             os.remove(audio_path)
-        if 'cover_path' in locals() and cover_path and os.path.exists(cover_path):
+        if cover_path and os.path.exists(cover_path):
             os.remove(cover_path)
+        if temp_file_path and os.path.exists(temp_file_path):
+            os.unlink(temp_file_path)
         raise HTTPException(status_code=500, detail="Erreur interne du serveur")
+
+
 # Taille des morceaux envoyés au client pendant le streaming (64 Ko)
 CHUNK_SIZE = 1024 * 64  # 64 Ko
 
